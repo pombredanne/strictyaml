@@ -1,7 +1,10 @@
-# When running in continuous integration, don't stop on first failure
+# When testing everything, do py 2 and 3 and three versions of ruamel.yaml
 
-failfast: false
+failfast: true
 pause_on_failure: false
 python_versions:
   - 2.7.10
   - 3.5.0
+ruamel_versions:
+  - 0.13.5  # earliest version known to work with python 2.7
+  - 0.13.13

@@ -1,45 +1,22 @@
-from ruamel.yaml import YAMLError
+from ruamel.yaml import MarkedYAMLError
+from ruamel.yaml.dumper import RoundTripDumper
+from ruamel.yaml import dump
+try:
+    from ruamel.yaml.error import Mark as StringMark
+except ImportError:
+    from ruamel.yaml.error import StringMark
 
 
-class StrictYAMLError(YAMLError):
-    @property
-    def start_line(self):
-        return self._start_line
-
-    @property
-    def end_line(self):
-        return self._end_line
-
-    @property
-    def message(self):
-        return self._message
+class StrictYAMLError(MarkedYAMLError):
+    pass
 
 
 class YAMLValidationError(StrictYAMLError):
-    def __init__(self, message, document, location):
-        self._message = message
-        self._document = document
-        self._start_line = location.start_line(self._document)
-        self._end_line = location.end_line(self._document)
-
-    def __repr__(self):
-        return "<YAMLValidationError {0}>".format(str(self._message))
-
-    def __str__(self):
-        return """{0}""".format(self._message)
-
-    def __unicode__(self):
-        return u"""{0}""".format(self._message)
+    pass
 
 
 class DisallowedToken(StrictYAMLError):
     MESSAGE = "Disallowed token"
-
-    def __init__(self, document, start_line, end_line):
-        self._document = document
-        self._start_line = start_line
-        self._end_line = end_line
-        self._message = self.MESSAGE
 
 
 class TagTokenDisallowed(DisallowedToken):
@@ -52,3 +29,32 @@ class FlowMappingDisallowed(DisallowedToken):
 
 class AnchorTokenDisallowed(DisallowedToken):
     MESSAGE = "Anchor tokens not allowed"
+
+
+class DuplicateKeysDisallowed(DisallowedToken):
+    MESSAGE = "Duplicate keys not allowed"
+
+
+def raise_exception(context, problem, document, location):
+    str_document = dump(document, Dumper=RoundTripDumper)
+    context_line = location.start_line(document) - 1
+    problem_line = location.end_line(document) - 1
+    context_index = len('\n'.join(str_document.split('\n')[:context_line]))
+    problem_index = len('\n'.join(str_document.split('\n')[:problem_line]))
+    raise YAMLValidationError(
+        context,
+        StringMark(
+            "<unicode string>", context_index, context_line, 0, str_document, context_index + 1
+        ),
+        problem,
+        StringMark(
+            "<unicode string>", problem_index, problem_line, 0, str_document, problem_index + 1
+        )
+    )
+
+
+def raise_type_error(yaml_object, to_type, alternatives):
+    raise TypeError((
+        "Cannot cast {0} to {1}.\n"
+        "Use {2} instead."
+    ).format(repr(yaml_object), to_type, alternatives))

@@ -1,7 +1,9 @@
+{% for ruamel_version in ruamel_versions %}
 {% for python_version in python_versions %}
 - name: Disallow invalid YAML
   preconditions:
     python_version: {{ python_version }}
+    ruamel version: {{ ruamel_version }}
     files:
       tag_tokens.yaml: |
         x:
@@ -10,6 +12,8 @@
           c: !!str yes
       flow_style.yaml: |
         x: { a: 1, b: 2, c: 3 }
+      flow_style_sequence.yaml: |
+        [a, b]: [x, y]
       node_anchors_and_references.yaml: |
         x: 
           a: &node1 3.5
@@ -25,25 +29,64 @@
 
         schema = Map({"x": Map({"a": Any(), "b": Any(), "c": Any()})})
 
-        try:
-            load(tag_tokens, schema)
-        except TagTokenDisallowed as error:
-            seq1_error = error
+    - Assert Exception:
+        command: load(tag_tokens, schema)
+        exception: |
+          While scanning
+            in "<unicode string>", line 2, column 11:
+                a: !!str yes
+                        ^ (line: 2)
+          Found disallowed tag tokens (do not specify types in markup)
+            in "<unicode string>", line 2, column 6:
+                a: !!str yes
+                   ^ (line: 2)
 
-        try:
-            load(flow_style, schema)
-        except FlowMappingDisallowed as error:
-            seq2_error = error
+    - Assert Exception:
+        command: load(flow_style_sequence)
+        exception: |
+          While scanning
+            in "<unicode string>", line 1, column 1:
+              [a, b]: [x, y]
+              ^ (line: 1)
+          Found ugly disallowed JSONesque flow mapping (surround with ' and ' to make text appear literally)
+            in "<unicode string>", line 1, column 2:
+              [a, b]: [x, y]
+               ^ (line: 1)
 
-        try:
-            load(node_anchors_and_references, schema)
-        except AnchorTokenDisallowed as error:
-            seq3_error = error
+    - Assert Exception:
+        command: load(flow_style, schema)
+        exception: |
+          While scanning
+            in "<unicode string>", line 1, column 4:
+              x: { a: 1, b: 2, c: 3 }
+                 ^ (line: 1)
+          Found ugly disallowed JSONesque flow mapping (surround with ' and ' to make text appear literally)
+            in "<unicode string>", line 1, column 5:
+              x: { a: 1, b: 2, c: 3 }
+                  ^ (line: 1)
 
-    - Assert True: seq1_error.start_line == 2
-    - Assert True: seq1_error.end_line == 2
-    - Assert True: seq2_error.start_line == 1
-    - Assert True: seq2_error.end_line == 1
-    - Assert True: seq3_error.start_line == 2
-    - Assert True: seq3_error.end_line == 2
+    - Assert Exception:
+        command: load(flow_style, schema)
+        exception: |
+          While scanning
+            in "<unicode string>", line 1, column 4:
+              x: { a: 1, b: 2, c: 3 }
+                 ^ (line: 1)
+          Found ugly disallowed JSONesque flow mapping (surround with ' and ' to make text appear literally)
+            in "<unicode string>", line 1, column 5:
+              x: { a: 1, b: 2, c: 3 }
+                  ^ (line: 1)
+
+    - Assert Exception:
+        command: load(node_anchors_and_references, schema)
+        exception: |
+          While scanning
+            in "<unicode string>", line 2, column 6:
+                a: &node1 3.5
+                   ^ (line: 2)
+          Found confusing disallowed anchor token (surround with ' and ' to make text appear literally)
+            in "<unicode string>", line 2, column 12:
+                a: &node1 3.5
+                         ^ (line: 2)
+{% endfor %}
 {% endfor %}

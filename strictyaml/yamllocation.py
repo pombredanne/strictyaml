@@ -1,6 +1,6 @@
 from ruamel.yaml.comments import CommentedSeq, CommentedMap
 from ruamel.yaml import dump, RoundTripDumper
-import copy
+from copy import deepcopy
 
 
 class YAMLLocation(object):
@@ -8,22 +8,22 @@ class YAMLLocation(object):
         self._indices = []
 
     def val(self, index):
-        new_location = copy.deepcopy(self)
+        new_location = deepcopy(self)
         new_location._indices.append(('val', index))
         return new_location
 
     def key(self, name):
-        new_location = copy.deepcopy(self)
+        new_location = deepcopy(self)
         new_location._indices.append(('key', name))
         return new_location
 
     def index(self, index):
-        new_location = copy.deepcopy(self)
+        new_location = deepcopy(self)
         new_location._indices.append(('index', index))
         return new_location
 
     def _slice_segment(self, indices, segment, include_selected):
-        slicedpart = copy.deepcopy(segment)
+        slicedpart = deepcopy(segment)
 
         if len(indices) == 0 and not include_selected:
             slicedpart = None
@@ -82,8 +82,23 @@ class YAMLLocation(object):
         slicedpart = self._slice_segment(self._indices, document, include_selected=True)
         return len(dump(slicedpart, Dumper=RoundTripDumper).rstrip().split('\n'))
 
+    def lines(self, document):
+        return "\n".join(dump(document, Dumper=RoundTripDumper).split('\n')[
+            self.start_line(document) - 1:self.end_line(document)
+        ])
+
+    def lines_before(self, document, how_many):
+        return "\n".join(dump(document, Dumper=RoundTripDumper).split('\n')[
+            self.start_line(document) - 1 - how_many:self.start_line(document) - 1
+        ])
+
+    def lines_after(self, document, how_many):
+        return "\n".join(dump(document, Dumper=RoundTripDumper).split('\n')[
+            self.end_line(document):self.end_line(document) + how_many
+        ])
+
     def get(self, document):
-        segment = copy.deepcopy(document)
+        segment = deepcopy(document)
         for index_type, index in self._indices:
             if index_type == "val":
                 segment = segment[index]
@@ -94,4 +109,4 @@ class YAMLLocation(object):
         return segment
 
     def __repr__(self):
-        return "<YAMLLocation>"
+        return "<YAMLLocation: {0}>".format(self._indices)

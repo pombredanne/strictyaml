@@ -32,6 +32,12 @@ What features does StrictYAML remove?
 |                          |      x: 1             |      load(yaml) == \                  |     raises FlowStyleDisallowed     |
 |                          |      b: {c: 3, d: 4}  |      {'x': {'a': 1}, 'y': {'a': 1}}   |                                    |
 +--------------------------+-----------------------+---------------------------------------+------------------------------------+
+| `Duplicate keys`_        | .. code-block:: yaml  | .. code-block:: python                | .. code-block:: python             |
+|                          |                       |                                       |                                    |
+|                          |      x: 1             |      load(yaml) == \                  |     raises DuplicateKeysDisallowed |
+|                          |      x: 2             |      {'x': 2}                         |                                    |
++--------------------------+-----------------------+---------------------------------------+------------------------------------+
+
 
 What is YAML?
 -------------
@@ -354,6 +360,25 @@ The *first* question in the FAQ of pyyaml actually subtly indicates that this fe
 To take a real life example, `this saltstack YAML definition <https://github.com/saltstack-formulas/mysql-formula/blob/master/mysql/server.sls#L22>`_ makes the distinction between flow style and jinja2 templates unclear.
 
 
+What is wrong with duplicate keys?
+----------------------------------
+
+Duplicate keys are allowed in regular YAML - as parsed by pyyaml, ruamel.yaml and poyo:
+
+.. code-block:: yaml
+
+    x: cow
+    y: dog
+    x: bull
+
+Not only is it unclear whether x should be "cow" or "bull" (the parser will decide 'bull', but did you know that?),
+if there are 200 lines between x: cow and x: bull, a user might very likely change the *first* x and erroneously believe
+that the resulting value of x has been changed - when it hasn't.
+
+In order to avoid all possible confusion, StrictYAML will simply refuse to parse this and will only accept associative
+arrays where all of the keys are unique. It will throw a DuplicateKeysDisallowed exception.
+
+
 Why not use INI files for configuration or DSLs?
 ------------------------------------------------
 
@@ -439,7 +464,24 @@ TOML's main criticism of YAML is spot on::
 StrictYAML's cut down version of the YAML specification however - with implicit typing, node anchors/references and flow style cut out,
 ends up being simpler than TOML.
 
-TOML's use of special characters for delimiters instead of whitespace makes the resulting output noiser and harder for humans
+The main complication in TOML is its inconsistency in how it handles tables and arrays. For example:
+
+``` toml
+# not clear that this is an array
+[[tables]]
+foo = "foo"
+```
+
+Similarly, all arrays have the type `array`. So even though arrays are homogenous in TOML, you can oddly do:
+
+``` toml
+array = [["foo"], [1]]
+
+# but not
+array = ["foo", 1]
+```
+
+TOML's use of special characters for delimiters instead of whitespace like YAML makes the resulting output noiser and harder for humans
 to parse. Here's an example from the TOML site:
 
 .. code-block:: toml
@@ -487,7 +529,22 @@ Or this:
 
   load(yaml, Map({"flt2": Float(), "string": Str()})) == {"flt": 3.1415, "string": "hello"}
 
-This not only eliminates the need for `syntax typing <https://github.com/crdoconnor/strictyaml/blob/master/FAQ.rst#whats-wrong-with-syntax-typing-in-a-readable-configuration-language>`_, it's more type safe.
+Which not only eliminates the need for `syntax typing <https://github.com/crdoconnor/strictyaml/blob/master/FAQ.rst#whats-wrong-with-syntax-typing-in-a-readable-configuration-language>`_, is more type safe.
+
+
+Why not HOCON?
+--------------
+
+`HOCON <https://github.com/typesafehub/config/blob/master/HOCON.md>`_ is another "redesigned" JSON, ironically enough, taking JSON and making it even more complicated.
+
+Along with JSON's syntax typing - a downside of most non-YAML alternatives, HOCON makes the following mistakes in its design:
+
+* It does not fail loudly on duplicate keys.
+* It has a confusing rules for deciding on concatenations and substitutions.
+* It has a mechanism for substitutions similar to YAML's node/anchor feature - which, unless used extremely sparingly, can create confusing markup that is *not* human optimized.
+
+In addition, its attempt at using "less pedantic" syntax creates a system of rules which makes the behavior of the parser less obvious.
+
 
 
 Why not use HJSON?
@@ -641,3 +698,4 @@ Please feel free to ensure all tickets come accompanied with a creative insult. 
 .. _Explicit tags: https://github.com/crdoconnor/strictyaml/blob/master/FAQ.rst#what-is-wrong-with-explicit-tags
 .. _Flow style: https://github.com/crdoconnor/strictyaml/blob/master/FAQ.rst#what-is-wrong-with-flow-style
 .. _Node anchors and refs: https://github.com/crdoconnor/strictyaml/blob/master/FAQ.rst#what-is-wrong-with-node-anchors-and-references
+.. _Duplicate keys: https://github.com/crdoconnor/strictyaml/blob/master/FAQ.rst#what-is-wrong-with-duplicate-keys

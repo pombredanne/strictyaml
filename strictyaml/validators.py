@@ -1,9 +1,12 @@
 from ruamel.yaml.comments import CommentedSeq, CommentedMap
 from strictyaml.exceptions import YAMLValidationError
 from strictyaml.yamllocation import YAMLLocation
+from strictyaml.exceptions import raise_exception
+from strictyaml.representation import YAML
+from strictyaml import utils
+import dateutil.parser
 import decimal
 import copy
-import re
 
 
 class Optional(object):
@@ -31,40 +34,22 @@ class OrValidator(Validator):
             location = YAMLLocation()
             document = copy.deepcopy(document)
 
-        error1 = None
-        error2 = None
-
         try:
-            validation_a = self._validator_a(document, location=location)
-        except YAMLValidationError as err:
-            error1 = err
+            return self._validator_a(document, location=location)
+        except YAMLValidationError:
+            return self._validator_b(document, location=location)
 
-        try:
-            validation_b = self._validator_b(document, location=location)
-        except YAMLValidationError as err:
-            error2 = err
-
-        if error1 is None:
-            return validation_a
-        if error2 is None:
-            return validation_b
-
-        if error1 is not None:
-            raise error1
-        if error2 is not None:
-            raise error2
+    def __repr__(self):
+        return u"{0} | {1}".format(repr(self._validator_a), repr(self._validator_b))
 
 
-def strip_accoutrements(document):
-    """
-    Replace CommentedMap with regular python dict and CommentedSeq with regular list.
-    """
-    if type(document) is CommentedMap:
-        return {key: strip_accoutrements(value) for key, value in document.items()}
-    elif type(document) is CommentedSeq:
-        return [strip_accoutrements(item) for item in document]
+def schema_from_data(document):
+    if isinstance(document, CommentedMap):
+        return Map({key: schema_from_data(value) for key, value in document.items()})
+    elif isinstance(document, CommentedSeq):
+        return FixedSeq([schema_from_data(item) for item in document])
     else:
-        return str(document)
+        return Str()
 
 
 class Any(Validator):
@@ -72,13 +57,13 @@ class Any(Validator):
     Validates any YAML and returns simple dicts/lists of strings.
     """
     def validate(self, document, location=None):
-        return strip_accoutrements(location.get(document))
+        if location is None:
+            location = YAMLLocation()
+            document = copy.deepcopy(document)
+        return schema_from_data(location.get(document))(document, location=location)
 
-
-class CommentedYAML(Validator):
-    """Validates any YAML and returns ruamel.yaml CommentedMap/CommentedSeq."""
-    def validate(self, document, location=None):
-        return location.get(document)
+    def __repr__(self):
+        return u"Any()"
 
 
 class Scalar(Validator):
@@ -90,75 +75,189 @@ class Scalar(Validator):
         val = location.get(document)
 
         if type(val) == CommentedSeq or type(val) == CommentedMap:
-            raise YAMLValidationError(
-                "Not {0}".format(self.rule_description),
-                document,
-                location=location
+            raise_exception(
+                "when expecting a {0}".format(self.__class__.__name__.lower()),
+                "found mapping/sequence",
+                document, location=location,
             )
         else:
-            return self.validate_scalar(document, location=location)
+            return self.validate_scalar(document, location, value=None)
 
 
 class Enum(Scalar):
     def __init__(self, restricted_to):
-        # TODO: Validate set or list
-        # TODO: Validate enum is always string
+        for element in restricted_to:
+            assert type(element) is str
         self._restricted_to = restricted_to
 
-    def validate(self, document, location=None):
-        val = str(location.get(document))
+    def validate_scalar(self, document, location, value):
+        val = str(location.get(document)) if value is None else value
         if val not in self._restricted_to:
-            raise YAMLValidationError(
-                "{} not in enum".format(val),
-                document,
-                location=location
+            raise_exception(
+                "when expecting one of: {0}".format(", ".join(self._restricted_to)),
+                "found '{0}'".format(val),
+                document, location=location,
             )
         else:
-            return val
+            return YAML(val, document=document, location=location)
+
+    def __repr__(self):
+        return u"Enum({0})".format(repr(self._restricted_to))
+
+
+class EmptyNone(Scalar):
+    def validate_scalar(self, document, location, value):
+        val = str(location.get(document)) if value is None else value
+        if val != "":
+            raise_exception(
+                "when expecting an empty value",
+                "found non-empty value",
+                document, location=location,
+            )
+        else:
+            return self.empty(document, location)
+
+    def empty(self, document, location):
+        return YAML(None, '', document=document, location=location)
+
+    def __repr__(self):
+        return u"EmptyNone()"
+
+
+class EmptyDict(EmptyNone):
+    def empty(self, document, location):
+        return YAML({}, '', document=document, location=location)
+
+    def __repr__(self):
+        return u"EmptyDict()"
+
+
+class EmptyList(EmptyNone):
+    def empty(self, document, location):
+        return YAML([], '', document=document, location=location)
+
+    def __repr__(self):
+        return u"EmptyList()"
+
+
+class CommaSeparated(Scalar):
+    def __init__(self, item_validator):
+        self._item_validator = item_validator
+
+    def validate_scalar(self, document, location, value):
+        val = str(location.get(document)) if value is None else value
+        return YAML(
+            [
+                YAML(self._item_validator.validate_scalar(document, location, value=item.lstrip()))
+                for item in val.split(",")
+            ],
+            document=document,
+            location=location
+        )
 
 
 class Str(Scalar):
-    def validate_scalar(self, document, location):
-        return str(location.get(document))
+    def validate_scalar(self, document, location, value=None):
+        return YAML(
+            str(location.get(document)) if value is None else value,
+            text=location.get(document),
+            document=document,
+            location=location
+        )
+
+    def __repr__(self):
+        return u"Str()"
 
 
 class Int(Scalar):
-    def validate_scalar(self, document, location):
-        val = str(location.get(document))
-        if re.compile("^[-+]?\d+$").match(val) is None:
-            raise YAMLValidationError("not an integer", document, location)
+    def validate_scalar(self, document, location, value=None):
+        val = str(location.get(document)) if value is None else value
+        if not utils.is_integer(val):
+            raise_exception(
+                    "when expecting an integer",
+                    "found non-integer",
+                    document, location=location,
+                )
         else:
-            return int(val)
+            return YAML(int(val), val, document=document, location=location)
+
+    def __repr__(self):
+        return u"Int()"
+
+
+TRUE_VALUES = ["yes", "true", "on", "1", ]
+FALSE_VALUES = ["no", "false", "off", "0", ]
+BOOL_VALUES = TRUE_VALUES + FALSE_VALUES
 
 
 class Bool(Scalar):
-    def validate_scalar(self, document, location):
-        val = str(location.get(document))
-        if str(val).lower() not in ["yes", "true", "no", "false", "on", "off", "1", "0", ]:
-            raise YAMLValidationError("not a bool", document, location)
+    def validate_scalar(self, document, location, value=None):
+        val = str(location.get(document)) if value is None else value
+        if str(val).lower() not in BOOL_VALUES:
+            raise_exception(
+                """when expecting a boolean value (one of "{0}")""".format(
+                    '", "'.join(BOOL_VALUES)
+                ),
+                "found non-boolean",
+                document, location=location,
+            )
         else:
-            if val in ["yes", "true", "on", "1", ]:
-                return True
+            if val in TRUE_VALUES:
+                return YAML(True, val, document=document, location=location)
             else:
-                return False
+                return YAML(False, val, document=document, location=location)
+
+    def __repr__(self):
+        return u"Bool()"
 
 
 class Float(Scalar):
-    def validate_scalar(self, document, location):
-        val = str(location.get(document))
-        if re.compile(r"^[-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?$").match(str(val)) is None:
-            raise YAMLValidationError("not a float", document, location)
+    def validate_scalar(self, document, location, value=None):
+        val = str(location.get(document)) if value is None else value
+        if not utils.is_decimal(str(val)):
+            raise_exception(
+                "when expecting a float",
+                "found non-float",
+                document, location=location,
+            )
         else:
-            return float(val)
+            return YAML(float(val), val, document=document, location=location)
+
+    def __repr__(self):
+        return u"Float()"
 
 
 class Decimal(Scalar):
-    def validate_scalar(self, document, location):
-        val = str(location.get(document))
-        if re.compile(r"^[-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?$").match(str(val)) is None:
-            raise YAMLValidationError("not a decimal", document, location)
+    def validate_scalar(self, document, location, value=None):
+        val = str(location.get(document)) if value is None else value
+        if not utils.is_decimal(str(val)):
+            raise_exception(
+                "when expecting a decimal",
+                "found non-decimal",
+                document, location=location,
+            )
         else:
-            return decimal.Decimal(val)
+            return YAML(decimal.Decimal(val), val, document=document, location=location)
+
+    def __repr__(self):
+        return u"Decimal()"
+
+
+class Datetime(Scalar):
+    def validate_scalar(self, document, location, value=None):
+        val = str(location.get(document)) if value is None else value
+
+        try:
+            return YAML(dateutil.parser.parse(val), val, document=document, location=location)
+        except ValueError:
+            raise_exception(
+                "when expecting a datetime",
+                "found non-datetime",
+                document, location=location,
+            )
+
+    def __repr__(self):
+        return u"Datetime()"
 
 
 class MapPattern(Validator):
@@ -170,89 +269,166 @@ class MapPattern(Validator):
         if location is None:
             location = YAMLLocation()
             document = copy.deepcopy(document)
-        return_snippet = {}
+        return_snippet = location.get(document)
 
         if type(location.get(document)) != CommentedMap:
-            raise YAMLValidationError("Not a mapping", document)
+            raise_exception(
+                "when expecting a mapping",
+                "found non-mapping",
+                document, location=location,
+            )
         else:
             for key, value in location.get(document).items():
                 valid_key = self._key_validator(document, location.key(key))
                 valid_val = self._value_validator(document, location.val(key))
                 return_snippet[valid_key] = valid_val
 
-        return return_snippet
+        return YAML(return_snippet, document=document, location=location)
+
+    def __repr__(self):
+        return u"MapPattern({0}, {1})".format(
+            repr(self._key_validator), repr(self._value_validator)
+        )
 
 
 class Map(Validator):
-    def __init__(self, validator, location=None):
+    def __init__(self, validator):
         self._validator = validator
 
         self._validator_dict = {
             key.key if type(key) == Optional else key: value for key, value in validator.items()
         }
 
+    def __repr__(self):
+        return u"Map({{{0}}})".format(', '.join([
+            '{0}: {1}'.format(
+                'Optional("{0}")'.format(key.key) if type(key) is Optional else '"{0}"'.format(key),
+                repr(value)
+            ) for key, value in self._validator.items()
+        ]))
+
     def validate(self, document, location=None):
         if location is None:
             location = YAMLLocation()
             document = copy.deepcopy(document)
-        return_snippet = {}
+        return_snippet = location.get(document)
 
         if type(location.get(document)) != CommentedMap:
-            raise YAMLValidationError("Not a map", document, location=location)
+            raise_exception(
+                "when expecting a mapping",
+                "found non-mapping",
+                document, location=location,
+            )
         else:
             for key, value in location.get(document).items():
                 if key not in self._validator_dict.keys():
-                    raise YAMLValidationError(
-                        "Invalid key found {}".format(key), document, location=location.key(key)
+                    raise_exception(
+                        "while parsing a mapping",
+                        "unexpected key not in schema '{0}'".format(key),
+                        document, location=location.key(key)
                     )
 
-                return_snippet[key] = self._validator_dict[key](
-                    document, location=location.val(key)
+                del return_snippet[key]
+                return_snippet[
+                    YAML(key, document=document, location=location.key(key))
+                ] = self._validator_dict[key](
+                    document, location.val(key)
                 )
 
-        return return_snippet
+        return YAML(return_snippet, document=document, location=location)
 
 
 class Seq(Validator):
     def __init__(self, validator):
         self._validator = validator
 
+    def __repr__(self):
+        return "Seq({0})".format(repr(self._validator))
+
     def validate(self, document, location=None):
         if location is None:
             location = YAMLLocation()
             document = copy.deepcopy(document)
-        return_snippet = []
+        return_snippet = location.get(document)
 
         if type(location.get(document)) != CommentedSeq:
-            raise YAMLValidationError("Not a sequence", document, location=location)
+            raise_exception(
+                "when expecting a sequence",
+                "found non-sequence",
+                document, location=location,
+            )
         else:
             for i, item in enumerate(location.get(document)):
-                return_snippet.append(self._validator(document, location=location.index(i)))
+                return_snippet[i] = self._validator(document, location=location.index(i))
 
-        return return_snippet
+        return YAML(return_snippet, document=document, location=location)
+
+
+class FixedSeq(Validator):
+    def __init__(self, validators):
+        self._validators = validators
+
+    def __repr__(self):
+        return "FixedSeq({0})".format(repr(self._validators))
+
+    def validate(self, document, location=None):
+        if location is None:
+            location = YAMLLocation()
+            document = copy.deepcopy(document)
+        return_snippet = location.get(document)
+
+        if type(location.get(document)) != CommentedSeq:
+            raise_exception(
+                "when expecting a sequence of {0} elements".format(len(self._validators)),
+                "found non-sequence",
+                document, location=location,
+            )
+        else:
+            if len(self._validators) != len(location.get(document)):
+                raise_exception(
+                    "when expecting a sequence of {0} elements".format(len(self._validators)),
+                    "found a sequence of {0} elements".format(len(location.get(document))),
+                    document, location=location,
+                )
+            for i, item_and_val in enumerate(zip(location.get(document), self._validators)):
+                item, validator = item_and_val
+                return_snippet[i] = validator(document, location=location.index(i))
+
+        return YAML(return_snippet, document=document, location=location)
 
 
 class UniqueSeq(Validator):
     def __init__(self, validator):
         self._validator = validator
 
+    def __repr__(self):
+        return "UniqueSeq({0})".format(repr(self._validator))
+
     def validate(self, document, location=None):
         if location is None:
             location = YAMLLocation()
             document = copy.deepcopy(document)
 
-        return_snippet = []
+        return_snippet = location.get(document)
 
         if type(location.get(document)) != CommentedSeq:
-            raise YAMLValidationError("Not a sequence", document, location=location)
+            raise_exception(
+                "when expecting a unique sequence",
+                "found non-sequence",
+                document, location=location,
+            )
         else:
             existing_items = set()
 
             for i, item in enumerate(location.get(document)):
                 if item in existing_items:
-                    raise YAMLValidationError("Duplicates found", document, location=location)
+                    raise_exception(
+                        "while parsing a sequence",
+                        "duplicate found",
+                        document, location=location
+                    )
                 else:
                     existing_items.add(item)
-                    return_snippet.append(self._validator(document, location=location.index(i)))
+                    return_snippet[i] = self._validator(document, location=location.index(i))
 
-        return return_snippet
+        return YAML(return_snippet, document=document, location=location)
