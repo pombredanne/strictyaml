@@ -3,7 +3,47 @@ from ruamel.yaml import dump, RoundTripDumper
 from copy import deepcopy
 
 
-class YAMLLocation(object):
+class YAMLChunk(object):
+    def __init__(self, document, pointer=None):
+        self._contents = None
+        self._document = document
+        self._pointer = pointer if pointer is not None \
+            else YAMLPointer()
+
+    def index(self, index):
+        return YAMLChunk(self._document, self._pointer.index(index))
+
+    def val(self, index):
+        return YAMLChunk(self._document, self._pointer.val(index))
+
+    def key(self, name):
+        return YAMLChunk(self._document, self._pointer.key(name))
+
+    def start_line(self):
+        return self._pointer.start_line(self._document)
+
+    def end_line(self):
+        return self._pointer.end_line(self._document)
+
+    def lines(self):
+        return self._pointer.lines(self._document)
+
+    def lines_before(self, how_many):
+        return self._pointer.lines_before(self._document, how_many)
+
+    def lines_after(self, how_many):
+        return self._pointer.lines_after(self._document, how_many)
+
+    @property
+    def document(self):
+        return self._document
+
+    @property
+    def contents(self):
+        return self._pointer.get(self._document)
+
+
+class YAMLPointer(object):
     def __init__(self):
         self._indices = []
 
@@ -53,7 +93,7 @@ class YAMLLocation(object):
                 if type(segment) == CommentedSeq:
                     for i, value in enumerate(segment):
                         if start_popping:
-                            slicedpart.pop(0)
+                            del slicedpart[-1]
 
                         if i == index:
                             start_popping = True
@@ -98,7 +138,7 @@ class YAMLLocation(object):
         ])
 
     def get(self, document):
-        segment = deepcopy(document)
+        segment = document
         for index_type, index in self._indices:
             if index_type == "val":
                 segment = segment[index]
@@ -106,7 +146,7 @@ class YAMLLocation(object):
                 segment = segment[index]
             else:
                 segment = index
-        return segment
+        return deepcopy(segment)
 
     def __repr__(self):
-        return "<YAMLLocation: {0}>".format(self._indices)
+        return "<YAMLPointer: {0}>".format(self._indices)

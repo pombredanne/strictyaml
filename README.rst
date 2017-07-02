@@ -1,8 +1,8 @@
 StrictYAML
 ==========
 
-StrictYAML is a `type-safe <https://en.wikipedia.org/wiki/Type_safety>`_ YAML parser
-built atop `ruamel.yaml <https://github.com/crdoconnor/strictyaml/blob/master/FAQ.rst#why-is-strictyaml-built-on-ruamelyaml>`_ that parses a
+StrictYAML is an optionally `type-safe <https://en.wikipedia.org/wiki/Type_safety>`_ YAML parser
+that parses a
 `restricted subset <https://github.com/crdoconnor/strictyaml/blob/master/FAQ.rst#what-features-does-strictyaml-remove>`_
 of the YAML specificaton.
 
@@ -13,9 +13,9 @@ Priorities:
 * Secure by default.
 * Strict validation of markup and straightforward type casting.
 * Clear, human readable exceptions with line numbers.
-* Acting as a drop in replacement for pyyaml, ruamel.yaml or poyo.
-* Roundtripping.
-* Letting you worry about more interesting things than parsing config files.
+* Acting as a near-drop in replacement for pyyaml, ruamel.yaml or poyo.
+* Roundtripping - reading in (commented) YAML and writing it out with comments.
+* Letting you worry about more interesting things than parsing or writing config files.
 
 Simple example:
 
@@ -96,6 +96,7 @@ If you're looking at this and thinking "why not do/use X instead?" that's a heal
 * `Why not use TOML? <https://github.com/crdoconnor/strictyaml/blob/master/FAQ.rst#why-not-use-toml>`_
 * `Why not use HJSON? <https://github.com/crdoconnor/strictyaml/blob/master/FAQ.rst#why-not-use-hjson>`_
 * `Why not use JSON5? <https://github.com/crdoconnor/strictyaml/blob/master/FAQ.rst#why-not-use-json5>`_
+* `Why not use HOCON? <https://github.com/crdoconnor/strictyaml/blob/master/FAQ.rst#why-not-hocon>`_
 * `Why not use pykwalify to validate YAML instead? <https://github.com/crdoconnor/strictyaml/blob/master/FAQ.rst#why-not-use-pykwalify-to-validate-yaml-instead>`_
 * `What if I still disagree with everything you wrote here? <https://github.com/crdoconnor/strictyaml/blob/master/FAQ.rst#what-if-i-still-disagree-with-everything-you-wrote-here>`_
 

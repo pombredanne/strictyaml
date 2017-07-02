@@ -3,23 +3,37 @@ from strictyaml.exceptions import raise_type_error
 from ruamel.yaml import RoundTripDumper
 from ruamel.yaml import dump
 from strictyaml import utils
-from copy import deepcopy
+from copy import copy, deepcopy
 import decimal
 
 
+import sys
+
+if sys.version_info[0] == 3:
+    unicode = str
+
+
 class YAML(object):
-    def __init__(self, value, text=None, document=None, location=None):
+    def __init__(self, value, text=None, chunk=None):
+        if isinstance(value, YAML):
+            self._value = value._value
+            self._text = value._text
+            self._chunk = value._chunk
+            return
+
         self._value = value
-        self._text = str(value) if text is None else text
-        self._document = deepcopy(document)
-        self._location = location
+        if not isinstance(value, CommentedMap) and not isinstance(value, CommentedSeq):
+            self._text = unicode(value) if text is None else text
+        else:
+            self._text = None
+        self._chunk = chunk
 
     def __int__(self):
         return int(self._value)
 
     def __str__(self):
-        if type(self._value) in (str, int, float, decimal.Decimal):
-            return str(self._value)
+        if type(self._value) in (unicode, int, float, decimal.Decimal):
+            return unicode(self._value)
         elif isinstance(self._value, CommentedMap) or isinstance(self._value, CommentedSeq):
             raise TypeError(
                 "Cannot cast mapping/sequence '{0}' to string".format(repr(self._value))
@@ -29,17 +43,20 @@ class YAML(object):
                 repr(self), "str", "str(yamlobj.value) or str(yamlobj.text)"
             )
 
+    def __unicode__(self):
+        return self.__str__()
+
     @property
     def data(self):
-        if type(self._value) is CommentedMap:
+        if isinstance(self._value, CommentedMap):
             mapping = {}
             for key, value in self._value.items():
-                if type(key) is str:
+                if type(key) in (str, unicode):
                     mapping[key] = value.data
                 else:
                     mapping[key.data] = value.data
             return mapping
-        elif type(self._value) is CommentedSeq:
+        elif isinstance(self._value, CommentedSeq):
             return [item.data for item in self._value]
         else:
             return self._value
@@ -76,27 +93,27 @@ class YAML(object):
         """
         Return line number that the element starts on (including preceding comments).
         """
-        return self._location.start_line(self._document)
+        return self._chunk.start_line()
 
     @property
     def end_line(self):
         """
         Return line number that the element ends on (including trailing comments).
         """
-        return self._location.end_line(self._document)
+        return self._chunk.end_line()
 
     def lines(self):
         """
         Return a string of the lines which make up the selected line
         including preceding and trailing comments.
         """
-        return self._location.lines(self._document)
+        return self._chunk.lines()
 
     def lines_before(self, how_many):
-        return self._location.lines_before(self._document, how_many)
+        return self._chunk.lines_before(how_many)
 
     def lines_after(self, how_many):
-        return self._location.lines_after(self._document, how_many)
+        return self._chunk.lines_after(how_many)
 
     def __float__(self):
         return float(self._value)
@@ -119,10 +136,17 @@ class YAML(object):
         return self._value[index]
 
     def __setitem__(self, index, value):
-        if isinstance(value, YAML):
-            self._value[index] = value.copy()
-        else:
-            self._value[index] = YAML(value)
+        if not isinstance(value, YAML):
+            if not isinstance(self._value[index].value, type(value)):
+                raise TypeError(
+                    "{0} is of type {1}, expected {2}".format(
+                        value,
+                        type(value),
+                        type(self._value[index].value),
+                    )
+                )
+        del self._value[index]
+        self._value[YAML(index)] = YAML(value)
 
     def __delitem__(self, index):
         del self._value[index]
@@ -134,7 +158,11 @@ class YAML(object):
         return len(self._value)
 
     def as_yaml(self):
-        return dump(self.as_marked_up(), Dumper=RoundTripDumper)
+        """
+        Render the YAML node and subnodes as string.
+        """
+        dumped = dump(self.as_marked_up(), Dumper=RoundTripDumper, allow_unicode=True)
+        return dumped if sys.version_info[0] == 3 else dumped.decode('utf8')
 
     def items(self):
         if not isinstance(self._value, CommentedMap):
@@ -173,7 +201,7 @@ class YAML(object):
         return self._text
 
     def copy(self):
-        return deepcopy(self)
+        return copy(self)
 
     def __gt__(self, val):
         if isinstance(self._value, CommentedMap) or isinstance(self._value, CommentedSeq):
